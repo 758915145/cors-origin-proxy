@@ -5,10 +5,10 @@ var app = express();
 
 app.all('*', function (req, res, next) {
   res.header('Access-Control-Allow-Origin', '*')
-  res.header('Access-Control-Allow-Headers', '*')
+  res.header('Access-Control-Allow-Headers', req.headers['access-control-request-headers'] || '*')
   res.header('Access-Control-Allow-Methods', '*')
   res.header('Content-Type', 'application/json;charset=UTF-8')
-  res.header('Access-Control-Expose-Headers', '*')
+  res.header('Access-Control-Expose-Headers', req.headers['access-control-expose-headers'] || '*')
   if (req.method.toLowerCase() == 'options') {
     res.sendStatus(200);  // 让options尝试请求快速结束
     return
@@ -26,7 +26,7 @@ app.all('*', function (req, res, next) {
       onProxyRes: function (proxyRes, req) {
         let proxyCookie = proxyRes.headers["set-cookie"];
         if (proxyCookie) {
-          res.header('cookie', proxyCookie[0])
+          res.header('cookie', proxyCookie.join(';'))
         }
       },
     })(req, res, next)
