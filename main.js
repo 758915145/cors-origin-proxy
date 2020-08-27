@@ -1,8 +1,8 @@
 var express = require('express');
+var fs = require('fs')
 var { createProxyMiddleware} = require('http-proxy-middleware');
 
 var app = express();
-
 app.all('*', function (req, res, next) {
   res.header('Access-Control-Allow-Origin', '*')
   res.header('Access-Control-Allow-Headers', req.headers['access-control-request-headers'] || '*')
@@ -13,10 +13,25 @@ app.all('*', function (req, res, next) {
     res.sendStatus(200);  // 让options尝试请求快速结束
     return
   }
+  var corsOrigin, localOrigin, key, targetOrigin
   var target = req.query['cors-origin'] || req.headers['cors-origin'] // 在url里或者header里加都行，优先使用url里的
-  if (target) {
+  var myCookie = req.headers.cookie
+  if (myCookie) {
+    localOrigin = myCookie.match(/local-origin=([^\s;]+);*/)
+    localOrigin = localOrigin && localOrigin[1]
+
+    corsOrigin = myCookie.match(/cors-origin=([^\s;]+);*/)
+    corsOrigin = corsOrigin && corsOrigin[1]
+
+    key = myCookie.match(/cors-key=([^\s;]+);*/)
+    key = key && key[1]
+  }
+  if (key && corsOrigin && localOrigin) {
+    targetOrigin = req.url.includes(key) ? corsOrigin : localOrigin
+  }
+  if (target || /^http/.test(targetOrigin || '')) {
     createProxyMiddleware({
-      target: target,
+      target: target || targetOrigin,
       changeOrigin: true,
       onProxyReq: function (proxyReq, req, res) {
         proxyReq.removeHeader('cors-origin')
@@ -31,7 +46,8 @@ app.all('*', function (req, res, next) {
       },
     })(req, res, next)
   } else {
-    res.send('{code: -1, message: "添加cors-origin请求头才能跨域，如：cors-origin:\"https://www.baidu.com\""}')
+    res.header('Content-Type', 'text/html; charset=UTF-8')
+    res.send(fs.readFileSync('./main.html').toString())
   }
 })
 app.listen(3000)
