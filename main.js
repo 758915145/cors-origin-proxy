@@ -1,8 +1,15 @@
-var express = require('express');
-var fs = require('fs')
-var { createProxyMiddleware} = require('http-proxy-middleware');
+const express = require('express');
+const fs = require('fs')
+const bodyParser = require("body-parser");
+const { createProxyMiddleware} = require('http-proxy-middleware');
+const app = express();
+// 解析以 application/json 和 application/x-www-form-urlencoded 提交的数据
+var jsonParser = bodyParser.json();
+var urlencodedParser = bodyParser.urlencoded({ extended: false });
+const configStr = fs.readFileSync('./config').toString()
+let config = eval(`(${configStr})`)
 
-var app = express();
+// 允许所有请求跨域
 app.all('*', function (req, res, next) {
   res.header('Access-Control-Allow-Origin', '*')
   res.header('Access-Control-Allow-Headers', req.headers['access-control-request-headers'] || '*')
@@ -13,41 +20,42 @@ app.all('*', function (req, res, next) {
     res.sendStatus(200);  // 让options尝试请求快速结束
     return
   }
-  var corsOrigin, localOrigin, key, targetOrigin
-  var target = req.query['cors-origin'] || req.headers['cors-origin'] // 在url里或者header里加都行，优先使用url里的
-  var myCookie = req.headers.cookie
-  if (myCookie) {
-    localOrigin = myCookie.match(/local-origin=([^\s;]+);*/)
-    localOrigin = localOrigin && localOrigin[1]
-
-    corsOrigin = myCookie.match(/cors-origin=([^\s;]+);*/)
-    corsOrigin = corsOrigin && corsOrigin[1]
-
-    key = myCookie.match(/cors-key=([^\s;]+);*/)
-    key = key && key[1]
-  }
-  if (key && corsOrigin && localOrigin) {
-    targetOrigin = req.url.includes(key) ? corsOrigin : localOrigin
-  }
-  if (target || /^http/.test(targetOrigin || '')) {
-    createProxyMiddleware({
-      target: target || targetOrigin,
-      changeOrigin: true,
-      onProxyReq: function (proxyReq, req, res) {
-        proxyReq.removeHeader('cors-origin')
-        proxyReq.removeHeader('Origin')
-        return proxyReq
-      },
-      onProxyRes: function (proxyRes, req) {
-        let proxyCookie = proxyRes.headers["set-cookie"];
-        if (proxyCookie) {
-          res.header('cookie', proxyCookie.join(';'))
-        }
-      },
-    })(req, res, next)
-  } else {
-    res.header('Content-Type', 'text/html; charset=UTF-8')
-    res.send(fs.readFileSync('./main.html').toString())
-  }
+  next()
 })
-app.listen(3000)
+// 管理页面
+app.get('/admin', function (req, res, next) {
+  res.header('Content-Type', 'text/html; charset=UTF-8')
+  const config = fs.readFileSync('./config').toString()
+  res.send(fs.readFileSync('./admin.html').toString().replace(/%%/, config))
+})
+// 配置
+app.post('/config', urlencodedParser, function (req, res, next) {
+  config = eval(`(${req.body.text})`)
+  fs.writeFileSync('./config', req.body.text)
+  res.send({isOk: true})
+})
+app.all('*', function (req, res, next) {
+  let target
+  for (let i = 0; i < config.length; i++) {
+    let match = config[i].match.test(req.url)
+    if (match) {
+      target = config[i].proxy
+      break
+    }
+  }
+  console.log(target)
+  if (!target) {
+    res.header('Content-Type', 'text/html; charset=UTF-8')
+    const config = fs.readFileSync('./config').toString()
+    res.send(fs.readFileSync('./admin.html').toString().replace(/%%/, config))
+    return
+  }
+  createProxyMiddleware({
+    target: target,
+    changeOrigin: true,
+    secure: false,
+    https: /^https/.test(target)
+  })(req, res, next)
+})
+let port = process.argv.find(i => i.includes('--port='))
+app.listen((port && port.split('--port=')[1]) || 3000)
