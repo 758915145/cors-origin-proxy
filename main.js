@@ -3,11 +3,16 @@ const fs = require('fs')
 const bodyParser = require("body-parser");
 const { createProxyMiddleware} = require('http-proxy-middleware');
 const app = express();
+const defaultConfig = `[
+  {match: /api/, proxy: "http://cloudbae.natapp1.cc"},
+  {match: /^.+$/, proxy: "http://192.168.1.8:8897"},
+]`
+let port = process.argv.find(i => i.includes('--port='))
+port = (port && port.split('--port=')[1]) || 3000
 // 解析以 application/json 和 application/x-www-form-urlencoded 提交的数据
-var jsonParser = bodyParser.json();
-var urlencodedParser = bodyParser.urlencoded({ extended: false });
-const configStr = fs.readFileSync('./config').toString()
-let config = eval(`(${configStr})`)
+const jsonParser = bodyParser.json();
+const urlencodedParser = bodyParser.urlencoded({ extended: false });
+const config = useConfig(port)
 
 // 允许所有请求跨域
 app.all('*', function (req, res, next) {
@@ -23,39 +28,64 @@ app.all('*', function (req, res, next) {
   next()
 })
 // 管理页面
-app.get('/admin', function (req, res, next) {
-  res.header('Content-Type', 'text/html; charset=UTF-8')
-  const config = fs.readFileSync('./config').toString()
-  res.send(fs.readFileSync('./admin.html').toString().replace(/%%/, config))
-})
+app.get('/admin', toAdmin)
 // 配置
 app.post('/config', urlencodedParser, function (req, res, next) {
-  config = eval(`(${req.body.text})`)
-  fs.writeFileSync('./config', req.body.text)
+  config.update(req.body.text)
   res.send({isOk: true})
 })
 app.all('*', function (req, res, next) {
-  let target
-  for (let i = 0; i < config.length; i++) {
-    let match = config[i].match.test(req.url)
-    if (match) {
-      target = config[i].proxy
-      break
-    }
-  }
-  console.log(target)
-  if (!target) {
-    res.header('Content-Type', 'text/html; charset=UTF-8')
-    const config = fs.readFileSync('./config').toString()
-    res.send(fs.readFileSync('./admin.html').toString().replace(/%%/, config))
+  let target = config.find(req.url)
+  if (!target.proxy) {
+    toAdmin(req, res)
     return
   }
   createProxyMiddleware({
-    target: target,
+    target: target.proxy,
     changeOrigin: true,
+    onProxyReq: function (proxyReq, req, res) {
+      if (target.onProxyReq) {
+        target.onProxyReq(proxyReq, req)
+      }
+      return proxyReq
+    },
     secure: false,
-    https: /^https/.test(target)
+    https: /^https/.test(target.proxy)
   })(req, res, next)
 })
-let port = process.argv.find(i => i.includes('--port='))
-app.listen((port && port.split('--port=')[1]) || 3000)
+app.listen(Number(port))
+
+function toAdmin(req, res) {
+  res.header('Content-Type', 'text/html; charset=UTF-8')
+  res.send(fs.readFileSync('./admin.html').toString().replace(/%%/, config.toString()))
+}
+
+function useConfig(port) {
+  let path = './config_' + port
+  if (!fs.existsSync(path)) {
+    fs.writeFileSync(path, defaultConfig)
+  }
+  let config = {
+    value: [],
+    toString() {
+      return fs.readFileSync(path).toString()
+    },
+    update(text) {
+      fs.writeFileSync(path, text)
+      config.value = eval(`(${config.toString()})`)
+    },
+    find(url) {
+      let target
+      for (let i = 0; i < config.value.length; i++) {
+        let match = config.value[i].match.test(url)
+        if (match) {
+          target = config.value[i]
+          break
+        }
+      }
+      return target
+    }
+  }
+  config.update(config.toString())
+  return config
+}

@@ -1,4 +1,0 @@
-[
-  {match: /api/, proxy: "http://cloudbae.natapp1.cc"},
-  {match: /^.+$/, proxy: "http://172.20.10.3:8897"},
-]
